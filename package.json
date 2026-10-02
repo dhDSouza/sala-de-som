@@ -1,0 +1,47 @@
+{
+	"name": "turma-playlist",
+	"version": "0.1.0",
+	"private": true,
+	"scripts": {
+		"dev": "next dev",
+		"build": "next build",
+		"start": "next start",
+		"lint": "eslint .",
+		"lint:fix": "eslint . --fix",
+		"format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,css}\" \"next.config.ts\" \"*.{json,mjs}\"",
+		"lint:format": "npm run format && npm run lint:fix",
+		"typecheck": "tsc --noEmit",
+		"db:migrate": "node --env-file=.env.local --require ts-node/register ./node_modules/typeorm/cli.js migration:run -d src/db/data-source.ts",
+		"db:compile": "tsc -p tsconfig.migrations.json",
+		"db:migrate:prod": "node ./node_modules/typeorm/cli.js migration:run -d dist-db/db/data-source.js"
+	},
+	"dependencies": {
+		"jose": "^6.0.0",
+		"lucide-react": "^0.468.0",
+		"next": "^16.3.7",
+		"nodemailer": "^10.0.13",
+		"pg": "^8.16.0",
+		"react": "^19.1.0",
+		"react-dom": "^19.1.0",
+		"reflect-metadata": "^0.2.2",
+		"typeorm": "^0.3.26",
+		"zod": "^4.1.0"
+	},
+	"devDependencies": {
+		"@eslint/eslintrc": "^3.3.7",
+		"@types/node": "^22.0.0",
+		"@types/nodemailer": "^8.0.2",
+		"@types/react": "^19.0.0",
+		"@types/react-dom": "^19.0.0",
+		"@typescript-eslint/parser": "^8.71.0",
+		"eslint": "^9.39.5",
+		"eslint-config-next": "^16.3.7",
+		"eslint-config-prettier": "^10.1.8",
+		"eslint-plugin-prettier": "^5.5.6",
+		"prettier": "^3.9.9",
+		"ts-node": "^10.9.2",
+		"typeorm-ts-node-commonjs": "^0.3.20",
+		"typescript": "^5.9.0",
+		"typescript-eslint": "^8.71.0"
+	}
+}
