@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { ArrowRight, Eye, EyeOff, Music2, Users } from 'lucide-react'
+import FeedbackToast from '@/components/FeedbackToast'
+import { feedbackDuration } from '@/lib/feedback'
 
 export default function AuthScreen({ onAuthenticated }: { onAuthenticated: () => Promise<void> }) {
 	const [mode, setMode] = useState<'login' | 'register'>('login')
@@ -13,9 +15,30 @@ export default function AuthScreen({ onAuthenticated }: { onAuthenticated: () =>
 	const [error, setError] = useState('')
 	const [notice, setNotice] = useState('')
 	const [busy, setBusy] = useState(false)
+	const [inviteCode, setInviteCode] = useState('')
 
 	useEffect(() => {
-		const reason = new URLSearchParams(window.location.search).get('error')
+		if (!error) return
+		const timer = setTimeout(() => setError(''), feedbackDuration.error)
+
+		return () => clearTimeout(timer)
+	}, [error])
+	useEffect(() => {
+		if (!notice) return
+		const timer = setTimeout(() => setNotice(''), feedbackDuration.success)
+
+		return () => clearTimeout(timer)
+	}, [notice])
+
+	useEffect(() => {
+		const params = new URLSearchParams(window.location.search)
+		const reason = params.get('error')
+		const invite = params.get('invite')
+
+		if (invite && /^[a-f0-9]{8}$/i.test(invite)) {
+			setInviteCode(invite.toUpperCase())
+			setMode('register')
+		}
 
 		if (reason === 'local-account') setError('Esta conta usa senha. Entre com e-mail e senha.')
 		else if (reason === 'google-unavailable')
@@ -38,7 +61,7 @@ export default function AuthScreen({ onAuthenticated }: { onAuthenticated: () =>
 			const response = await fetch(`/api/auth/password/${mode}`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ name, email, password }),
+				body: JSON.stringify({ name, email, password, invite: inviteCode || undefined }),
 			})
 			const result = await response.json()
 
@@ -58,6 +81,12 @@ export default function AuthScreen({ onAuthenticated }: { onAuthenticated: () =>
 
 	return (
 		<main className="authPage">
+			<FeedbackToast
+				error={error}
+				message={notice}
+				onCloseError={() => setError('')}
+				onCloseMessage={() => setNotice('')}
+			/>
 			<section className="authIntro">
 				<div className="authBrand">
 					<Music2 size={30} /> Sala de Som
@@ -106,18 +135,11 @@ export default function AuthScreen({ onAuthenticated }: { onAuthenticated: () =>
 							? 'Entre para continuar de onde parou.'
 							: 'Crie sua conta para participar das playlists.'}
 					</p>
-					{error && (
-						<div className="alert error" role="alert">
-							{error}
-							<button type="button" onClick={() => setError('')} aria-label="Fechar aviso">
-								×
-							</button>
-						</div>
-					)}
-					{notice && (
-						<div className="alert" role="status">
-							{notice}
-						</div>
+					{inviteCode && (
+						<p className="inviteAuthNotice">
+							Você recebeu um convite para uma turma. Crie uma conta ou entre; o acesso à turma será feito
+							automaticamente após o login.
+						</p>
 					)}
 					<form className="authForm" onSubmit={submit}>
 						{mode === 'register' && (
@@ -190,7 +212,10 @@ export default function AuthScreen({ onAuthenticated }: { onAuthenticated: () =>
 					<div className="authDivider">
 						<span>ou continue com</span>
 					</div>
-					<a className="authGoogle" href="/api/auth/google/start">
+					<a
+						className="authGoogle"
+						href={inviteCode ? `/api/auth/google/start?invite=${inviteCode}` : '/api/auth/google/start'}
+					>
 						<span className="googleG">G</span> Google
 					</a>
 					<small className="authFootnote">Vídeos reproduzidos pelo player incorporado do YouTube.</small>

@@ -4,6 +4,7 @@ import Image from 'next/image'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Music2, Plus, RefreshCw, Save, Trash2 } from 'lucide-react'
 import { feedbackDuration } from '@/lib/feedback'
+import FeedbackToast from '@/components/FeedbackToast'
 
 type Role = 'ADMIN' | 'TEACHER' | 'STUDENT'
 type AdminUser = {
@@ -52,6 +53,7 @@ async function request(path: string, options?: RequestInit) {
 
 export default function AdminPanel({ onChanged }: { onChanged: () => Promise<void> }) {
 	const [users, setUsers] = useState<AdminUser[]>([])
+	const [userQuery, setUserQuery] = useState('')
 	const [rooms, setRooms] = useState<Room[]>([])
 	const [selectedRoomId, setSelectedRoomId] = useState('')
 	const [selectedPlaylistId, setSelectedPlaylistId] = useState('')
@@ -157,10 +159,25 @@ export default function AdminPanel({ onChanged }: { onChanged: () => Promise<voi
 	}
 
 	const managers = users.filter((user) => user.role !== 'STUDENT')
+	const normalizedUserQuery = userQuery.trim().toLocaleLowerCase('pt-BR')
+	const filteredUsers = users.filter((user) =>
+		[
+			user.name,
+			user.email || '',
+			user.role,
+			{ ADMIN: 'Administrador', TEACHER: 'Professor', STUDENT: 'Aluno' }[user.role],
+		].some((value) => value.toLocaleLowerCase('pt-BR').includes(normalizedUserQuery)),
+	)
 	const selectedRoom = rooms.find((room) => room.id === selectedRoomId)
 
 	return (
 		<section className="adminPage" aria-busy={busy}>
+			<FeedbackToast
+				error={error}
+				message={message}
+				onCloseError={() => setError('')}
+				onCloseMessage={() => setMessage('')}
+			/>
 			<div className="sectionHead">
 				<div>
 					<span className="eyebrow">ADMINISTRAÇÃO</span>
@@ -170,22 +187,6 @@ export default function AdminPanel({ onChanged }: { onChanged: () => Promise<voi
 					<RefreshCw size={17} /> Atualizar
 				</button>
 			</div>
-			{error && (
-				<div className="alert error" role="alert">
-					{error}
-					<button type="button" onClick={() => setError('')} aria-label="Fechar erro">
-						×
-					</button>
-				</div>
-			)}
-			{message && (
-				<div className="alert success" role="status">
-					{message}
-					<button type="button" onClick={() => setMessage('')} aria-label="Fechar aviso">
-						×
-					</button>
-				</div>
-			)}
 			{busy && (
 				<p className="workingStatus" role="status">
 					Salvando alterações...
@@ -230,8 +231,20 @@ export default function AdminPanel({ onChanged }: { onChanged: () => Promise<voi
 						<Plus size={17} /> Criar
 					</button>
 				</form>
+				<label className="adminSearch">
+					<span>Buscar usuários</span>
+					<input
+						type="search"
+						value={userQuery}
+						onChange={(event) => setUserQuery(event.target.value)}
+						placeholder="Nome, e-mail ou perfil"
+					/>
+				</label>
+				<p className="adminSearchCount" role="status">
+					{filteredUsers.length} de {users.length} usuários
+				</p>
 				<div className="adminList">
-					{users.map((item) => (
+					{filteredUsers.map((item) => (
 						<form
 							className="adminRow"
 							key={item.id}
