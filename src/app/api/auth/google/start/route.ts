@@ -3,9 +3,18 @@ import { randomBytes } from 'crypto'
 import { origin, redirectUri } from '@/lib/google'
 
 export const runtime = 'nodejs'
-export async function GET() {
-	if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET)
-		return NextResponse.redirect(origin() + '/?error=google-unavailable')
+export async function GET(req: Request) {
+	const requestedInvite = new URL(req.url).searchParams.get('invite')
+	const invite = requestedInvite && /^[a-f0-9]{8}$/i.test(requestedInvite) ? requestedInvite.toUpperCase() : ''
+
+	if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+		const fallback = new URL('/', origin())
+
+		fallback.searchParams.set('error', 'google-unavailable')
+		if (invite) fallback.searchParams.set('invite', invite)
+
+		return NextResponse.redirect(fallback)
+	}
 
 	const state = randomBytes(24).toString('hex')
 	const url = new URL('https://accounts.google.com/o/oauth2/v2/auth')
@@ -27,6 +36,15 @@ export async function GET() {
 		maxAge: 600,
 		path: '/',
 	})
+	if (invite)
+		res.cookies.set('oauth_invite', invite, {
+			httpOnly: true,
+			sameSite: 'lax',
+			secure: process.env.NODE_ENV === 'production',
+			maxAge: 600,
+			path: '/',
+		})
+	else res.cookies.delete('oauth_invite')
 
 	return res
 }
