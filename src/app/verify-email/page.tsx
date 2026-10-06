@@ -9,10 +9,13 @@ export default function VerifyEmailPage() {
 	const [message, setMessage] = useState('')
 	const [busy, setBusy] = useState(false)
 	const [verified, setVerified] = useState(false)
+	const [invite, setInvite] = useState('')
 
 	useEffect(() => {
 		const value = new URLSearchParams(window.location.hash.slice(1)).get('verify')
+		const inviteCode = new URLSearchParams(window.location.search).get('invite')
 
+		if (inviteCode && /^[a-f0-9]{8}$/i.test(inviteCode)) setInvite(inviteCode.toUpperCase())
 		if (value) setToken(value)
 		else setMessage('Link de confirmação inválido. Faça o cadastro novamente.')
 	}, [])
@@ -32,7 +35,7 @@ export default function VerifyEmailPage() {
 			if (!response.ok) throw new Error(result.error || 'Não foi possível confirmar o e-mail.')
 			setVerified(true)
 			setToken('')
-			window.history.replaceState(null, '', window.location.pathname)
+			window.history.replaceState(null, '', window.location.pathname + window.location.search)
 		} catch (caught) {
 			setMessage((caught as Error).message)
 		} finally {
@@ -68,7 +71,7 @@ export default function VerifyEmailPage() {
 								{busy ? 'Confirmando...' : 'Confirmar e-mail'}
 							</button>
 						)}
-						<Link className="authGoogle" href="/">
+						<Link className="authGoogle" href={invite ? `/?invite=${invite}` : '/'}>
 							Voltar para entrar
 						</Link>
 					</div>

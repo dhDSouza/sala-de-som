@@ -13,6 +13,10 @@ const credentials = z.object({
 	name: z.string().trim().min(2).max(100),
 	email: z.email().trim().toLowerCase().max(254),
 	password: z.string().min(8).max(128),
+	invite: z
+		.string()
+		.regex(/^[a-f0-9]{8}$/i)
+		.optional(),
 })
 
 export async function POST(req: Request) {
@@ -20,7 +24,7 @@ export async function POST(req: Request) {
 
 	if (!parsed.success)
 		return Response.json({ error: 'Informe nome, e-mail válido e senha de 8 a 128 caracteres.' }, { status: 400 })
-	const { name, email, password } = parsed.data
+	const { name, email, password, invite } = parsed.data
 
 	if (!emailDeliveryConfigured())
 		return Response.json(
@@ -47,7 +51,7 @@ export async function POST(req: Request) {
 			},
 			['email'],
 		)
-		await sendVerificationEmail(email, name, token)
+		await sendVerificationEmail(email, name, token, invite)
 
 		return Response.json({ ok: true, pending: true }, { status: 202 })
 	} catch {

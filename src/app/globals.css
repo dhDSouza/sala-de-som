@@ -1159,6 +1159,80 @@ small {
 	display: grid;
 }
 
+.adminSearch {
+	display: grid;
+	gap: 8px;
+	margin-bottom: 8px;
+	max-width: 420px;
+}
+
+.adminSearch input {
+	width: 100%;
+}
+
+.adminSearchCount {
+	margin-bottom: 12px;
+	color: #aaa4bb;
+	font-size: 0.85rem;
+}
+
+.feedbackToasts {
+	position: fixed;
+	z-index: 10000;
+	top: calc(16px + env(safe-area-inset-top));
+	right: 16px;
+	width: min(420px, calc(100vw - 32px));
+	display: grid;
+	gap: 10px;
+	pointer-events: none;
+}
+
+.feedbackToasts .alert {
+	margin: 0;
+	box-shadow: 0 12px 36px #0009;
+	pointer-events: auto;
+}
+
+.feedbackToasts .alert span {
+	min-width: 0;
+	flex: 1;
+}
+
+.errorPage {
+	min-height: 100dvh;
+	display: grid;
+	place-items: center;
+	padding: 24px;
+}
+
+.errorCard {
+	width: min(100%, 520px);
+	padding: clamp(24px, 5vw, 48px);
+	border: 1px solid #343047;
+	border-radius: 20px;
+	background: #191720;
+	text-align: center;
+}
+
+.errorCard h1 {
+	margin: 12px 0;
+}
+
+.errorCard p {
+	color: #bdb6cc;
+}
+
+.errorCard a {
+	display: inline-block;
+	margin-top: 12px;
+	padding: 12px 20px;
+	border-radius: 10px;
+	background: #a994f8;
+	color: #171027;
+	font-weight: 700;
+	text-decoration: none;
+}
+
 .adminRow {
 	grid-template-columns: minmax(150px, 2fr) minmax(180px, 2fr) minmax(120px, 1fr) auto auto auto;
 	padding: 10px 0;
@@ -1793,15 +1867,6 @@ body {
 	display: flex;
 	flex-direction: column;
 	min-width: 0;
-}
-.primaryColumn > .trackSection {
-	order: 0;
-}
-.primaryColumn > .searchPanel {
-	order: 1;
-}
-.primaryColumn > .trackSection + .trackSection {
-	order: 2;
 }
 .trackSection,
 .searchPanel,
@@ -2556,5 +2621,152 @@ body {
 	.playerCurrent .footerArt {
 		width: 40px;
 		height: 40px;
+	}
+}
+
+.sidebarToggle {
+	display: grid;
+	place-items: center;
+	width: 40px;
+	height: 40px;
+	flex: none;
+	border: 1px solid #354052;
+	border-radius: 10px;
+	background: #121b27;
+	color: #d6c3ff;
+}
+
+.sidebarToggle:hover,
+.sidebarToggle:focus-visible {
+	background: #302842;
+}
+
+.sidebar nav a {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	min-height: 48px;
+	padding: 12px 15px;
+	border-radius: 9px;
+	color: #c0c6d5;
+	font-weight: 600;
+	text-align: left;
+	text-decoration: none;
+}
+
+.sidebar nav a:hover,
+.sidebar nav a.active,
+.sidebar nav a:focus-visible {
+	border-left: 3px solid #b48cff;
+	background: linear-gradient(90deg, #50347f, #1b2633);
+	color: #e1ceff;
+}
+
+.sidebar nav a svg {
+	flex: none;
+}
+
+.trackSort {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin: 0 0 16px;
+	color: #aab3c2;
+	font-size: 0.85rem;
+}
+
+.trackSort select {
+	min-width: 0;
+	max-width: 100%;
+}
+
+.removeTrack {
+	color: #ffc1cd;
+	background: #3d3039;
+}
+
+.rightRail {
+	min-width: 0;
+	max-width: 100%;
+	grid-template-columns: minmax(0, 1fr);
+}
+
+.rightRail > *,
+.rightRail .topSong,
+.rightRail .rulesCard p {
+	min-width: 0;
+	max-width: 100%;
+	overflow-wrap: anywhere;
+}
+
+.inviteLink {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 10px;
+	margin: 12px 0 18px;
+}
+
+.inviteLink a {
+	min-width: 0;
+	flex: 1 1 190px;
+	color: #d5baff;
+	overflow-wrap: anywhere;
+}
+
+.inviteAuthNotice {
+	padding: 12px 14px;
+	border: 1px solid #674a92;
+	border-radius: 10px;
+	background: #302842;
+	color: #e1ceff;
+}
+
+@media (min-width: 751px) {
+	.sidebarCollapsed {
+		grid-template-columns: 72px minmax(0, 1fr);
+	}
+
+	.sidebarCollapsed .sidebar {
+		width: 72px;
+		padding-inline: 8px;
+	}
+
+	.sidebarCollapsed .sidebar .sideLabel,
+	.sidebarCollapsed .sidebar .sidebarPromo,
+	.sidebarCollapsed .sidebar .sideBottom .user,
+	.sidebarCollapsed .sidebar nav a span {
+		display: none;
+	}
+
+	.sidebarCollapsed .sidebar nav a {
+		justify-content: center;
+		padding-inline: 0;
+	}
+
+	.sidebarCollapsed .sidebar .sideBottom {
+		justify-content: center;
+		margin-top: auto;
+	}
+}
+
+@media (min-width: 1181px) {
+	.rightRail {
+		position: sticky;
+		top: 88px;
+		align-self: start;
+	}
+}
+
+@media (max-width: 750px) {
+	.sidebar nav a {
+		flex: 0 0 auto;
+		white-space: nowrap;
+		padding: 10px 12px;
+	}
+
+	.sidebarToggle {
+		display: none;
 	}
 }

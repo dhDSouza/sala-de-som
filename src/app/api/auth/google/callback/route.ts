@@ -8,9 +8,19 @@ export const runtime = 'nodejs'
 export async function GET(req: NextRequest) {
 	const code = req.nextUrl.searchParams.get('code')
 	const state = req.nextUrl.searchParams.get('state')
+	const storedInvite = req.cookies.get('oauth_invite')?.value
+	const invite = storedInvite && /^[a-f0-9]{8}$/.test(storedInvite) ? storedInvite : ''
+	const destination = (error?: string) => {
+		const url = new URL('/', origin())
+
+		if (invite) url.searchParams.set('invite', invite)
+		if (error) url.searchParams.set('error', error)
+
+		return url
+	}
 
 	if (!code || !state || state !== req.cookies.get('oauth_state')?.value)
-		return NextResponse.redirect(origin() + '/?error=oauth')
+		return NextResponse.redirect(destination('oauth'))
 	try {
 		const response = await fetch('https://oauth2.googleapis.com/token', {
 			method: 'POST',
@@ -38,8 +48,7 @@ export async function GET(req: NextRequest) {
 		const email = String(profile.email).trim().toLowerCase()
 		const existing = (await repo.findOneBy({ googleId: profile.sub })) || (await repo.findOneBy({ email }))
 
-		if (existing?.passwordHash && !existing.googleId)
-			return NextResponse.redirect(origin() + '/?error=local-account')
+		if (existing?.passwordHash && !existing.googleId) return NextResponse.redirect(destination('local-account'))
 		const user = await repo.save({
 			...(existing || {}),
 			googleId: profile.sub,
@@ -48,13 +57,14 @@ export async function GET(req: NextRequest) {
 			avatar: existing?.avatar || profile.picture || null,
 			role: existing?.role || (email === process.env.BOOTSTRAP_ADMIN_EMAIL?.toLowerCase() ? 'ADMIN' : 'STUDENT'),
 		})
-		const res = NextResponse.redirect(origin() + '/')
+		const res = NextResponse.redirect(destination())
 
 		res.cookies.set('session', await sign(user.id), sessionCookieOptions)
 		res.cookies.delete('oauth_state')
+		res.cookies.delete('oauth_invite')
 
 		return res
 	} catch {
-		return NextResponse.redirect(origin() + '/?error=google')
+		return NextResponse.redirect(destination('google'))
 	}
 }

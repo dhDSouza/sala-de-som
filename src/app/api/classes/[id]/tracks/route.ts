@@ -58,7 +58,7 @@ export async function GET(req: Request, { params }: Context) {
 					? `/api/classes/${room.id}/avatars/${track.userId}`
 					: null,
 			}))
-			.sort((a, b) => b.votes - a.votes || a.createdAt.getTime() - b.createdAt.getTime()),
+			.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id)),
 	})
 }
 

@@ -21,11 +21,16 @@ import {
 	GraduationCap,
 	ListMusic,
 	Headphones,
+	PanelLeftClose,
+	PanelLeftOpen,
+	Trash2,
+	Pencil,
 } from 'lucide-react'
 import AdminPanel from '@/components/AdminPanel'
 import ProfilePanel from '@/components/ProfilePanel'
 import AuthScreen from '@/components/AuthScreen'
 import { feedbackDuration } from '@/lib/feedback'
+import FeedbackToast from '@/components/FeedbackToast'
 
 type User = {
 	id: string
@@ -59,6 +64,7 @@ type Track = {
 	suggestedAvatar: string | null
 	playedAt: string | null
 }
+type DashboardView = 'playlist' | 'ranking' | 'settings' | 'admin' | 'profile' | 'createClass'
 type YTPlayer = {
 	loadVideoById: (id: string) => void
 	playVideo: () => void
@@ -137,9 +143,8 @@ export default function Dashboard() {
 		[videoTitle, setVideoTitle] = useState(''),
 		[videoArtist, setVideoArtist] = useState(''),
 		[filter, setFilter] = useState(''),
-		[view, setView] = useState<'playlist' | 'ranking' | 'settings' | 'admin' | 'profile' | 'createClass'>(
-			'playlist',
-		),
+		[view, setView] = useState<DashboardView>('playlist'),
+		[sortMode, setSortMode] = useState<'original' | 'popular'>('original'),
 		[error, setError] = useState(''),
 		[notice, setNotice] = useState(''),
 		[loading, setLoading] = useState(true),
@@ -152,7 +157,10 @@ export default function Dashboard() {
 		[current, setCurrent] = useState<Track | null>(null),
 		[ready, setReady] = useState(false)
 	const [busy, setBusy] = useState(false)
+	const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 	const player = useRef<YTPlayer | null>(null),
+		initialNavigationApplied = useRef(false),
+		inviteProcessed = useRef(false),
 		queue = useRef<Track[]>([]),
 		currentRef = useRef<Track | null>(null),
 		busyRef = useRef(false),
@@ -165,11 +173,63 @@ export default function Dashboard() {
 	const playerVisible = Boolean(roomId) && view === 'playlist'
 	const refresh = useCallback(async () => {
 		try {
-			const data = await api('/me')
+			let data = await api('/me')
+			let invitedRoomId = ''
+			const inviteCode = new URLSearchParams(window.location.search).get('invite')
+
+			if (inviteCode && !inviteProcessed.current) {
+				inviteProcessed.current = true
+				try {
+					const joined: Room = await api('/classes/join', {
+						method: 'POST',
+						body: JSON.stringify({ code: inviteCode }),
+					})
+
+					invitedRoomId = joined.id
+					data = await api('/me')
+					const url = new URL(window.location.href)
+
+					url.searchParams.delete('invite')
+					window.history.replaceState(null, '', url.pathname + url.search + url.hash)
+					setNotice('Você entrou na turma pelo convite!')
+				} catch (caught) {
+					setError((caught as Error).message)
+				}
+			}
 
 			setUser(data.user)
 			setClasses(data.classes)
-			setRoom((old) => data.classes.find((c: Room) => c.id === old?.id) || data.classes[0] || null)
+			if (!initialNavigationApplied.current) {
+				initialNavigationApplied.current = true
+				const params = new URLSearchParams(window.location.search)
+				const initialRoom =
+					data.classes.find((item: Room) => item.id === (invitedRoomId || params.get('classId'))) ||
+					data.classes[0] ||
+					null
+				const requestedView = params.get('view')
+				const canEditRoom =
+					data.user.role === 'ADMIN' ||
+					(data.user.role === 'TEACHER' &&
+						initialRoom &&
+						(initialRoom.ownerId === data.user.id || initialRoom.teacherIds.includes(data.user.id)))
+
+				setRoom(initialRoom)
+				if (initialRoom?.playlists.some((playlist: Playlist) => playlist.id === params.get('playlistId')))
+					setSelectedPlaylistId(params.get('playlistId') || '')
+				if (
+					!invitedRoomId &&
+					(requestedView === 'ranking' ||
+						requestedView === 'profile' ||
+						(requestedView === 'admin' && data.user.role === 'ADMIN') ||
+						(requestedView === 'createClass' && data.user.role !== 'STUDENT') ||
+						(requestedView === 'settings' && canEditRoom))
+				)
+					setView(requestedView)
+			} else
+				setRoom(
+					(old) =>
+						data.classes.find((c: Room) => c.id === (invitedRoomId || old?.id)) || data.classes[0] || null,
+				)
 		} catch (caught) {
 			if ((caught as Error & { status?: number }).status === 401) setUser(null)
 			else setError((caught as Error).message)
@@ -242,7 +302,9 @@ export default function Dashboard() {
 		return () => clearInterval(timer)
 	}, [roomId, selectedPlaylistId, load])
 	useEffect(() => {
-		queue.current = tracks.filter((t) => t.status === 'APPROVED')
+		const approvedTracks = tracks.filter((t) => t.status === 'APPROVED')
+
+		queue.current = sortMode === 'popular' ? [...approvedTracks].sort((a, b) => b.votes - a.votes) : approvedTracks
 		const active = currentRef.current
 
 		if (active) {
@@ -258,7 +320,7 @@ export default function Dashboard() {
 				setCurrent(updated)
 			}
 		}
-	}, [tracks])
+	}, [tracks, sortMode])
 	useEffect(() => {
 		currentRef.current = null
 		setCurrent(null)
@@ -408,7 +470,8 @@ export default function Dashboard() {
 	if (!user) return <AuthScreen onAuthenticated={refresh} />
 	const approved = tracks.filter((t) => t.status === 'APPROVED'),
 		pending = tracks.filter((t) => t.status === 'PENDING')
-	const filteredApproved = approved.filter((track) =>
+	const sortedApproved = sortMode === 'popular' ? [...approved].sort((a, b) => b.votes - a.votes) : approved
+	const filteredApproved = sortedApproved.filter((track) =>
 		`${track.title} ${track.artist} ${track.suggestedBy}`
 			.toLocaleLowerCase('pt-BR')
 			.includes(filter.toLocaleLowerCase('pt-BR')),
@@ -416,6 +479,7 @@ export default function Dashboard() {
 	const topVoted = [...approved].sort((a, b) => b.votes - a.votes).slice(0, 3)
 	const selectedPlaylist =
 		room?.playlists.find((playlist) => playlist.id === selectedPlaylistId) || room?.playlists[0]
+	const inviteUrl = room && typeof window !== 'undefined' ? `${window.location.origin}/?invite=${room.code}` : ''
 	const studentRanks = Object.entries(
 		approved.reduce<Record<string, number>>((acc, t) => {
 			acc[t.suggestedBy] = (acc[t.suggestedBy] || 0) + t.votes
@@ -423,10 +487,28 @@ export default function Dashboard() {
 			return acc
 		}, {}),
 	).sort((a, b) => b[1] - a[1])
+	const navHref = (destination: DashboardView) => {
+		const params = new URLSearchParams({ view: destination })
+
+		if (room) params.set('classId', room.id)
+		if (selectedPlaylistId) params.set('playlistId', selectedPlaylistId)
+
+		return `/?${params.toString()}`
+	}
 
 	return (
-		<div className="appShell">
+		<div className={`appShell${sidebarCollapsed ? ' sidebarCollapsed' : ''}`}>
 			<header className="globalHeader">
+				<button
+					className="sidebarToggle"
+					type="button"
+					onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+					aria-label={sidebarCollapsed ? 'Expandir menu de navegação' : 'Recolher menu de navegação'}
+					aria-expanded={!sidebarCollapsed}
+					title={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'}
+				>
+					{sidebarCollapsed ? <PanelLeftOpen size={21} /> : <PanelLeftClose size={21} />}
+				</button>
 				<div className="headerBrand">
 					<span className="headerBrandIcon">
 						<Music2 size={27} />
@@ -496,32 +578,71 @@ export default function Dashboard() {
 				</div>
 				<div className="sideLabel">NAVEGAÇÃO</div>
 				<nav>
-					<button className={view === 'playlist' ? 'active' : ''} onClick={() => setView('playlist')}>
-						<ListMusic size={19} /> Playlists
-					</button>
-					<button className={view === 'ranking' ? 'active' : ''} onClick={() => setView('ranking')}>
-						<ThumbsUp size={19} /> Ranking
-					</button>
-					<button className={view === 'profile' ? 'active' : ''} onClick={() => setView('profile')}>
-						<CircleUserRound size={19} /> Meu perfil
-					</button>
+					<a
+						className={view === 'playlist' ? 'active' : ''}
+						href={navHref('playlist')}
+						target="_blank"
+						rel="noopener noreferrer"
+						aria-label="Playlists, abre em nova aba"
+						title="Playlists (abrir em nova aba)"
+					>
+						<ListMusic size={19} /> <span>Playlists</span>
+					</a>
+					<a
+						className={view === 'ranking' ? 'active' : ''}
+						href={navHref('ranking')}
+						target="_blank"
+						rel="noopener noreferrer"
+						aria-label="Ranking, abre em nova aba"
+						title="Ranking (abrir em nova aba)"
+					>
+						<ThumbsUp size={19} /> <span>Ranking</span>
+					</a>
+					<a
+						className={view === 'profile' ? 'active' : ''}
+						href={navHref('profile')}
+						target="_blank"
+						rel="noopener noreferrer"
+						aria-label="Meu perfil, abre em nova aba"
+						title="Meu perfil (abrir em nova aba)"
+					>
+						<CircleUserRound size={19} /> <span>Meu perfil</span>
+					</a>
 					{canManage && (
-						<button className={view === 'settings' ? 'active' : ''} onClick={() => setView('settings')}>
-							<Settings size={19} /> Configurações
-						</button>
+						<a
+							className={view === 'settings' ? 'active' : ''}
+							href={navHref('settings')}
+							target="_blank"
+							rel="noopener noreferrer"
+							aria-label="Configurações, abre em nova aba"
+							title="Configurações (abrir em nova aba)"
+						>
+							<Settings size={19} /> <span>Configurações</span>
+						</a>
 					)}
 					{canCreateClass && (
-						<button
+						<a
 							className={view === 'createClass' ? 'active' : ''}
-							onClick={() => setView('createClass')}
+							href={navHref('createClass')}
+							target="_blank"
+							rel="noopener noreferrer"
+							aria-label="Nova turma, abre em nova aba"
+							title="Nova turma (abrir em nova aba)"
 						>
-							<Plus size={19} /> Nova turma
-						</button>
+							<Plus size={19} /> <span>Nova turma</span>
+						</a>
 					)}
 					{user.role === 'ADMIN' && (
-						<button className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}>
-							<ShieldCheck size={19} /> Administração
-						</button>
+						<a
+							className={view === 'admin' ? 'active' : ''}
+							href={navHref('admin')}
+							target="_blank"
+							rel="noopener noreferrer"
+							aria-label="Administração, abre em nova aba"
+							title="Administração (abrir em nova aba)"
+						>
+							<ShieldCheck size={19} /> <span>Administração</span>
+						</a>
 					)}
 				</nav>
 				<div className="sidebarPromo">
@@ -626,18 +747,12 @@ export default function Dashboard() {
 						Salvando alterações...
 					</p>
 				)}
-				{error && (
-					<div className="alert error" role="alert">
-						{error}
-						<button onClick={() => setError('')}>×</button>
-					</div>
-				)}
-				{notice && (
-					<div className="alert success">
-						{notice}
-						<button onClick={() => setNotice('')}>×</button>
-					</div>
-				)}
+				<FeedbackToast
+					error={error}
+					message={notice}
+					onCloseError={() => setError('')}
+					onCloseMessage={() => setNotice('')}
+				/>
 				{view === 'profile' ? (
 					<ProfilePanel user={user} onChanged={refresh} />
 				) : view === 'admin' && user.role === 'ADMIN' ? (
@@ -773,7 +888,30 @@ export default function Dashboard() {
 						</div>
 						<div className="panel">
 							<h2>Convite</h2>
-							<p>Compartilhe este código com os alunos. A turma mantém a lista de vídeos no sistema.</p>
+							<p>
+								Compartilhe o link. Quem ainda não tem conta poderá se cadastrar antes de entrar na
+								turma.
+							</p>
+							<div className="inviteLink">
+								<a href={inviteUrl} target="_blank" rel="noopener noreferrer">
+									{inviteUrl}
+								</a>
+								<button
+									type="button"
+									className="secondary"
+									onClick={() =>
+										navigator.clipboard
+											.writeText(inviteUrl)
+											.then(() => setNotice('Link do convite copiado!'))
+											.catch(() =>
+												setError('Não foi possível copiar o link. Copie-o manualmente.'),
+											)
+									}
+								>
+									<Copy size={17} /> Copiar link
+								</button>
+							</div>
+							<p>Também é possível entrar com o código:</p>
 							<div className="invite">
 								<span>Código da turma</span>
 								<strong>{room.code}</strong>
@@ -1031,7 +1169,7 @@ export default function Dashboard() {
 											className="primary"
 											type="button"
 											disabled={!approved.length || !ready}
-											onClick={() => startTrack(approved[0])}
+											onClick={() => startTrack(sortedApproved[0])}
 										>
 											<Play size={16} /> Reproduzir tudo
 										</button>
@@ -1059,6 +1197,16 @@ export default function Dashboard() {
 										))}
 									</select>
 									<span>{approved.length} músicas aprovadas</span>
+								</label>
+								<label className="trackSort">
+									Ordem de reprodução
+									<select
+										value={sortMode}
+										onChange={(event) => setSortMode(event.target.value as 'original' | 'popular')}
+									>
+										<option value="original">Ordem de inclusão</option>
+										<option value="popular">Mais curtidas</option>
+									</select>
 								</label>
 								{filteredApproved.length ? (
 									filteredApproved.map((t, i) => (
@@ -1108,13 +1256,66 @@ export default function Dashboard() {
 											>
 												<ExternalLink size={17} />
 											</a>
+											{canManage && (
+												<>
+													<button
+														className="externalTrack"
+														type="button"
+														aria-label={`Editar ${t.title}`}
+														title="Editar música"
+														onClick={() => {
+															const title = prompt('Título da música', t.title)
+
+															if (title === null) return
+															const artist = prompt('Artista', t.artist)
+
+															if (artist === null) return
+															void action(
+																() =>
+																	api(`/classes/${room.id}/tracks`, {
+																		method: 'PATCH',
+																		body: JSON.stringify({
+																			suggestionId: t.id,
+																			title,
+																			artist,
+																		}),
+																	}),
+																'Música atualizada.',
+															)
+														}}
+													>
+														<Pencil size={17} />
+													</button>
+													<button
+														className="externalTrack removeTrack"
+														type="button"
+														aria-label={`Excluir ${t.title}`}
+														title="Excluir música"
+														onClick={() => {
+															if (confirm(`Excluir ${t.title} desta playlist?`))
+																void action(
+																	() =>
+																		api(`/classes/${room.id}/tracks`, {
+																			method: 'DELETE',
+																			body: JSON.stringify({
+																				suggestionId: t.id,
+																			}),
+																		}),
+																	'Música excluída.',
+																)
+														}}
+													>
+														<Trash2 size={17} />
+													</button>
+												</>
+											)}
 										</div>
 									))
 								) : (
 									<div className="emptyTracks">
 										{filter
 											? 'Nenhuma música corresponde à busca.'
-											: 'A playlist ainda está vazia. Adicione uma música abaixo.'}
+											: 'A playlist ainda está vazia. Adicione uma música acima.'}
 									</div>
 								)}
 							</section>
@@ -1175,6 +1376,25 @@ export default function Dashboard() {
 												}
 											>
 												Recusar
+											</button>
+											<button
+												className="externalTrack removeTrack"
+												type="button"
+												aria-label={`Excluir ${t.title}`}
+												title="Excluir música"
+												onClick={() => {
+													if (confirm(`Excluir ${t.title} desta playlist?`))
+														void action(
+															() =>
+																api(`/classes/${room.id}/tracks`, {
+																	method: 'DELETE',
+																	body: JSON.stringify({ suggestionId: t.id }),
+																}),
+															'Música excluída.',
+														)
+												}}
+											>
+												<Trash2 size={17} />
 											</button>
 										</div>
 									))}
