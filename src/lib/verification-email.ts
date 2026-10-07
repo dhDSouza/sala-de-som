@@ -24,7 +24,7 @@ export function emailDeliveryConfigured() {
 	)
 }
 
-export async function sendVerificationEmail(to: string, name: string, token: string) {
+export async function sendVerificationEmail(to: string, name: string, token: string, invite?: string) {
 	if (!emailDeliveryConfigured()) throw new Error('SMTP não configurado')
 	const port = Number(process.env.SMTP_PORT)
 
@@ -35,6 +35,7 @@ export async function sendVerificationEmail(to: string, name: string, token: str
 		throw new Error('APP_URL precisa ser uma URL HTTPS em produção')
 	const url = new URL('/verify-email', origin)
 
+	if (invite) url.searchParams.set('invite', invite.toUpperCase())
 	url.hash = `verify=${token}`
 	const verificationUrl = url.toString()
 	const safeName = escapeHtml(name)

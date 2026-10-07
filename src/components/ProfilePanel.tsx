@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Camera, Save, Trash2 } from 'lucide-react'
 import { feedbackDuration } from '@/lib/feedback'
+import FeedbackToast from '@/components/FeedbackToast'
 
 type ProfileUser = {
 	name: string
@@ -17,6 +18,7 @@ export default function ProfilePanel({ user, onChanged }: { user: ProfileUser; o
 	const [message, setMessage] = useState('')
 	const [error, setError] = useState('')
 	const [busy, setBusy] = useState(false)
+	const [selectedFileName, setSelectedFileName] = useState('')
 	const photoInput = useRef<HTMLInputElement | null>(null)
 
 	useEffect(() => {
@@ -40,27 +42,17 @@ export default function ProfilePanel({ user, onChanged }: { user: ProfileUser; o
 
 	return (
 		<section className="profilePage panel">
+			<FeedbackToast
+				error={error}
+				message={message}
+				onCloseError={() => setError('')}
+				onCloseMessage={() => setMessage('')}
+			/>
 			<div>
 				<span className="eyebrow">MEU PERFIL</span>
 				<h2>Dados pessoais</h2>
 				<p>Atualize seu nome e escolha uma foto de até 2 MB.</p>
 			</div>
-			{error && (
-				<div className="alert error" role="alert">
-					{error}
-					<button type="button" onClick={() => setError('')} aria-label="Fechar erro">
-						×
-					</button>
-				</div>
-			)}
-			{message && (
-				<div className="alert success" role="status">
-					{message}
-					<button type="button" onClick={() => setMessage('')} aria-label="Fechar aviso">
-						×
-					</button>
-				</div>
-			)}
 			<form
 				className="profileForm"
 				aria-busy={busy}
@@ -80,6 +72,8 @@ export default function ProfilePanel({ user, onChanged }: { user: ProfileUser; o
 
 						if (!response.ok) throw new Error(data.error || 'Não foi possível atualizar o perfil.')
 						setPreview(data.avatar)
+						setSelectedFileName('')
+						if (photoInput.current) photoInput.current.value = ''
 						setRemoveAvatar(false)
 						setMessage('Perfil atualizado.')
 						await onChanged()
@@ -111,17 +105,20 @@ export default function ProfilePanel({ user, onChanged }: { user: ProfileUser; o
 
 								if (file) {
 									setPreview(URL.createObjectURL(file))
+									setSelectedFileName(file.name)
 									setRemoveAvatar(false)
 								}
 							}}
 						/>
 					</label>
+					{selectedFileName && <span className="selectedFileName">{selectedFileName}</span>}
 					<button
 						className="secondary"
 						type="button"
 						onClick={() => {
 							if (photoInput.current) photoInput.current.value = ''
 							setPreview(null)
+							setSelectedFileName('')
 							setRemoveAvatar(true)
 						}}
 					>

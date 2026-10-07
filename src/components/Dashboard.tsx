@@ -1,7 +1,7 @@
 'use client'
 
 import Image from 'next/image'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
 	Music2,
 	Plus,
@@ -12,6 +12,7 @@ import {
 	Play,
 	Pause,
 	SkipForward,
+	SkipBack,
 	Disc3,
 	ShieldCheck,
 	Copy,
@@ -21,11 +22,20 @@ import {
 	GraduationCap,
 	ListMusic,
 	Headphones,
+	PanelLeftClose,
+	PanelLeftOpen,
+	Trash2,
+	Pencil,
+	Shuffle,
+	Repeat2,
+	Repeat1,
+	Volume2,
 } from 'lucide-react'
 import AdminPanel from '@/components/AdminPanel'
 import ProfilePanel from '@/components/ProfilePanel'
 import AuthScreen from '@/components/AuthScreen'
 import { feedbackDuration } from '@/lib/feedback'
+import FeedbackToast from '@/components/FeedbackToast'
 
 type User = {
 	id: string
@@ -59,15 +69,42 @@ type Track = {
 	suggestedAvatar: string | null
 	playedAt: string | null
 }
+type DashboardView = 'playlist' | 'ranking' | 'settings' | 'admin' | 'profile' | 'createClass'
+type RepeatMode = 'off' | 'all' | 'one'
 type YTPlayer = {
 	loadVideoById: (id: string) => void
 	playVideo: () => void
 	pauseVideo: () => void
 	stopVideo: () => void
 	getPlayerState: () => number
+	getCurrentTime?: () => number
+	getDuration?: () => number
+	seekTo?: (seconds: number, allowSeekAhead: boolean) => void
+	setVolume?: (volume: number) => void
 	destroy: () => void
 }
 let youtubeApiPromise: Promise<void> | null = null
+
+function shuffled<T>(items: T[]) {
+	const result = [...items]
+
+	for (let index = result.length - 1; index > 0; index--) {
+		const randomIndex = Math.floor(Math.random() * (index + 1))
+		const chosen = result[randomIndex]
+
+		result[randomIndex] = result[index]
+		result[index] = chosen
+	}
+
+	return result
+}
+
+function clockTime(seconds: number) {
+	if (!Number.isFinite(seconds) || seconds < 0) return '0:00'
+	const whole = Math.floor(seconds)
+
+	return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
+}
 
 function loadYouTubeApi() {
 	if (window.YT?.Player) return Promise.resolve()
@@ -137,9 +174,8 @@ export default function Dashboard() {
 		[videoTitle, setVideoTitle] = useState(''),
 		[videoArtist, setVideoArtist] = useState(''),
 		[filter, setFilter] = useState(''),
-		[view, setView] = useState<'playlist' | 'ranking' | 'settings' | 'admin' | 'profile' | 'createClass'>(
-			'playlist',
-		),
+		[view, setView] = useState<DashboardView>('playlist'),
+		[sortMode, setSortMode] = useState<'original' | 'popular'>('original'),
 		[error, setError] = useState(''),
 		[notice, setNotice] = useState(''),
 		[loading, setLoading] = useState(true),
@@ -151,9 +187,21 @@ export default function Dashboard() {
 		[playing, setPlaying] = useState(false),
 		[current, setCurrent] = useState<Track | null>(null),
 		[ready, setReady] = useState(false)
+	const [shuffleEnabled, setShuffleEnabled] = useState(false)
+	const [shuffleOrderIds, setShuffleOrderIds] = useState<string[]>([])
+	const [repeatMode, setRepeatMode] = useState<RepeatMode>('off')
+	const [elapsed, setElapsed] = useState(0)
+	const [duration, setDuration] = useState(0)
+	const [volume, setVolume] = useState(70)
 	const [busy, setBusy] = useState(false)
+	const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 	const player = useRef<YTPlayer | null>(null),
+		initialNavigationApplied = useRef(false),
+		inviteProcessed = useRef(false),
 		queue = useRef<Track[]>([]),
+		shuffleRef = useRef(false),
+		repeatRef = useRef<RepeatMode>('off'),
+		nextRef = useRef<(automatic?: boolean) => void>(() => {}),
 		currentRef = useRef<Track | null>(null),
 		busyRef = useRef(false),
 		loadVersion = useRef(0)
@@ -162,14 +210,80 @@ export default function Dashboard() {
 		user?.role === 'ADMIN' ||
 		(user?.role === 'TEACHER' && (room?.ownerId === user.id || room?.teacherIds.includes(user.id)))
 	const roomId = room?.id
-	const playerVisible = Boolean(roomId) && view === 'playlist'
+	const playerVisible = Boolean(roomId) && Boolean(user)
+	const playbackQueue = useMemo(() => {
+		const approvedTracks = tracks.filter((track) => track.status === 'APPROVED')
+		const orderedTracks =
+			sortMode === 'popular' ? [...approvedTracks].sort((a, b) => b.votes - a.votes) : approvedTracks
+
+		if (!shuffleEnabled) return orderedTracks
+
+		const positions = new Map(shuffleOrderIds.map((id, index) => [id, index]))
+
+		return [...orderedTracks].sort(
+			(a, b) =>
+				(positions.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (positions.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+		)
+	}, [tracks, sortMode, shuffleEnabled, shuffleOrderIds])
 	const refresh = useCallback(async () => {
 		try {
-			const data = await api('/me')
+			let data = await api('/me')
+			let invitedRoomId = ''
+			const inviteCode = new URLSearchParams(window.location.search).get('invite')
+
+			if (inviteCode && !inviteProcessed.current) {
+				inviteProcessed.current = true
+				try {
+					const joined: Room = await api('/classes/join', {
+						method: 'POST',
+						body: JSON.stringify({ code: inviteCode }),
+					})
+
+					invitedRoomId = joined.id
+					data = await api('/me')
+					const url = new URL(window.location.href)
+
+					url.searchParams.delete('invite')
+					window.history.replaceState(null, '', url.pathname + url.search + url.hash)
+					setNotice('Você entrou na turma pelo convite!')
+				} catch (caught) {
+					setError((caught as Error).message)
+				}
+			}
 
 			setUser(data.user)
 			setClasses(data.classes)
-			setRoom((old) => data.classes.find((c: Room) => c.id === old?.id) || data.classes[0] || null)
+			if (!initialNavigationApplied.current) {
+				initialNavigationApplied.current = true
+				const params = new URLSearchParams(window.location.search)
+				const initialRoom =
+					data.classes.find((item: Room) => item.id === (invitedRoomId || params.get('classId'))) ||
+					data.classes[0] ||
+					null
+				const requestedView = params.get('view')
+				const canEditRoom =
+					data.user.role === 'ADMIN' ||
+					(data.user.role === 'TEACHER' &&
+						initialRoom &&
+						(initialRoom.ownerId === data.user.id || initialRoom.teacherIds.includes(data.user.id)))
+
+				setRoom(initialRoom)
+				if (initialRoom?.playlists.some((playlist: Playlist) => playlist.id === params.get('playlistId')))
+					setSelectedPlaylistId(params.get('playlistId') || '')
+				if (
+					!invitedRoomId &&
+					(requestedView === 'ranking' ||
+						requestedView === 'profile' ||
+						(requestedView === 'admin' && data.user.role === 'ADMIN') ||
+						(requestedView === 'createClass' && data.user.role !== 'STUDENT') ||
+						(requestedView === 'settings' && canEditRoom))
+				)
+					setView(requestedView)
+			} else
+				setRoom(
+					(old) =>
+						data.classes.find((c: Room) => c.id === (invitedRoomId || old?.id)) || data.classes[0] || null,
+				)
 		} catch (caught) {
 			if ((caught as Error & { status?: number }).status === 401) setUser(null)
 			else setError((caught as Error).message)
@@ -224,6 +338,41 @@ export default function Dashboard() {
 		refresh()
 	}, [refresh])
 	useEffect(() => {
+		const restoreNavigation = () => {
+			const params = new URLSearchParams(window.location.search)
+			const linkedRoom = classes.find((item) => item.id === params.get('classId'))
+			const requested = params.get('view')
+			const selectedRoom = linkedRoom || room
+			const allowedToManage =
+				user?.role === 'ADMIN' ||
+				(user?.role === 'TEACHER' &&
+					selectedRoom &&
+					(selectedRoom.ownerId === user.id || selectedRoom.teacherIds.includes(user.id)))
+
+			if (linkedRoom) {
+				setRoom(linkedRoom)
+				const playlistId = params.get('playlistId')
+
+				if (playlistId && linkedRoom.playlists.some((playlist) => playlist.id === playlistId))
+					setSelectedPlaylistId(playlistId)
+			}
+			if (
+				requested === 'playlist' ||
+				requested === 'ranking' ||
+				requested === 'profile' ||
+				(requested === 'admin' && user?.role === 'ADMIN') ||
+				(requested === 'createClass' && Boolean(user) && user?.role !== 'STUDENT') ||
+				(requested === 'settings' && allowedToManage)
+			)
+				setView(requested)
+			else setView('playlist')
+		}
+
+		window.addEventListener('popstate', restoreNavigation)
+
+		return () => window.removeEventListener('popstate', restoreNavigation)
+	}, [classes, room, user])
+	useEffect(() => {
 		if (roomId) load(roomId, selectedPlaylistId, true)
 	}, [roomId, selectedPlaylistId, load])
 	useEffect(() => {
@@ -242,7 +391,7 @@ export default function Dashboard() {
 		return () => clearInterval(timer)
 	}, [roomId, selectedPlaylistId, load])
 	useEffect(() => {
-		queue.current = tracks.filter((t) => t.status === 'APPROVED')
+		queue.current = playbackQueue
 		const active = currentRef.current
 
 		if (active) {
@@ -253,18 +402,37 @@ export default function Dashboard() {
 				setCurrent(null)
 				setPlaying(false)
 				player.current?.stopVideo?.()
-			} else if (updated.title !== active.title || updated.artist !== active.artist) {
+			} else if (
+				updated.title !== active.title ||
+				updated.artist !== active.artist ||
+				updated.votes !== active.votes ||
+				updated.voted !== active.voted ||
+				updated.suggestedAvatar !== active.suggestedAvatar
+			) {
 				currentRef.current = updated
 				setCurrent(updated)
 			}
 		}
-	}, [tracks])
+	}, [tracks, playbackQueue])
 	useEffect(() => {
 		currentRef.current = null
 		setCurrent(null)
 		setPlaying(false)
+		setElapsed(0)
+		setDuration(0)
 		player.current?.stopVideo?.()
 	}, [roomId, selectedPlaylistId])
+	useEffect(() => {
+		if (!playerVisible) return
+		const timer = setInterval(() => {
+			const activePlayer = player.current
+
+			setElapsed(activePlayer?.getCurrentTime?.() || 0)
+			setDuration(activePlayer?.getDuration?.() || 0)
+		}, 750)
+
+		return () => clearInterval(timer)
+	}, [playerVisible])
 	useEffect(() => {
 		if (!notice) return
 		const timer = setTimeout(() => setNotice(''), feedbackDuration.success)
@@ -336,29 +504,64 @@ export default function Dashboard() {
 
 		currentRef.current = track
 		setCurrent(track)
+		setElapsed(0)
+		setDuration(0)
 		activePlayer.loadVideoById(track.youtubeVideoId)
 		setPlaying(true)
 	}
 
-	function next() {
+	function next(automatic = false) {
 		const index = queue.current.findIndex((t) => t.id === currentRef.current?.id)
-		const following = queue.current[index + 1]
+		const following =
+			automatic && repeatRef.current === 'one'
+				? currentRef.current
+				: queue.current[index + 1] || (repeatRef.current === 'all' ? queue.current[0] : null)
 
 		if (following) {
-			const activePlayer = player.current
-
-			if (typeof activePlayer?.loadVideoById !== 'function') return
-			currentRef.current = following
-			setCurrent(following)
-			activePlayer.loadVideoById(following.youtubeVideoId)
-			setPlaying(true)
+			startTrack(following)
 		} else {
 			currentRef.current = null
 			setCurrent(null)
 			setPlaying(false)
+			setElapsed(0)
+			setDuration(0)
 			player.current?.stopVideo?.()
 		}
 	}
+
+	function previous() {
+		const index = queue.current.findIndex((track) => track.id === currentRef.current?.id)
+
+		if (index > 0) startTrack(queue.current[index - 1])
+	}
+
+	function toggleShuffle() {
+		const enabled = !shuffleRef.current
+
+		shuffleRef.current = enabled
+		setShuffleOrderIds(
+			enabled
+				? [
+						currentRef.current?.id,
+						...shuffled(
+							queue.current.map((track) => track.id).filter((id) => id !== currentRef.current?.id),
+						),
+					].filter((id): id is string => Boolean(id))
+				: [],
+		)
+		setShuffleEnabled(enabled)
+	}
+
+	function cycleRepeat() {
+		const nextMode = repeatRef.current === 'off' ? 'all' : repeatRef.current === 'all' ? 'one' : 'off'
+
+		repeatRef.current = nextMode
+		setRepeatMode(nextMode)
+	}
+
+	useEffect(() => {
+		nextRef.current = next
+	})
 
 	useEffect(() => {
 		if (!playerVisible) return
@@ -373,12 +576,14 @@ export default function Dashboard() {
 				playerVars: { playsinline: 1, origin: location.origin },
 				events: {
 					onReady: () => {
-						if (!cancelled) setReady(true)
+						if (!cancelled) {
+							setReady(true)
+						}
 					},
 					onStateChange: (e) => {
 						if (cancelled) return
 						setPlaying(e.data === 1)
-						if (e.data === 0 && currentRef.current) next()
+						if (e.data === 0 && currentRef.current) nextRef.current(true)
 					},
 					onError: () => {
 						if (!cancelled) setError('Este vídeo não pode ser reproduzido aqui. Escolha outro.')
@@ -398,6 +603,9 @@ export default function Dashboard() {
 			setReady(false)
 		}
 	}, [playerVisible])
+	useEffect(() => {
+		if (ready) player.current?.setVolume?.(volume)
+	}, [ready, volume])
 	if (loading)
 		return (
 			<main className="center">
@@ -408,7 +616,11 @@ export default function Dashboard() {
 	if (!user) return <AuthScreen onAuthenticated={refresh} />
 	const approved = tracks.filter((t) => t.status === 'APPROVED'),
 		pending = tracks.filter((t) => t.status === 'PENDING')
-	const filteredApproved = approved.filter((track) =>
+	const sortedApproved = sortMode === 'popular' ? [...approved].sort((a, b) => b.votes - a.votes) : approved
+	const visibleQueue = playbackQueue
+	const activeQueueIndex = visibleQueue.findIndex((track) => track.id === current?.id)
+	const queuePreview = visibleQueue.slice(Math.max(0, activeQueueIndex), Math.max(0, activeQueueIndex) + 8)
+	const filteredApproved = sortedApproved.filter((track) =>
 		`${track.title} ${track.artist} ${track.suggestedBy}`
 			.toLocaleLowerCase('pt-BR')
 			.includes(filter.toLocaleLowerCase('pt-BR')),
@@ -416,6 +628,7 @@ export default function Dashboard() {
 	const topVoted = [...approved].sort((a, b) => b.votes - a.votes).slice(0, 3)
 	const selectedPlaylist =
 		room?.playlists.find((playlist) => playlist.id === selectedPlaylistId) || room?.playlists[0]
+	const inviteUrl = room && typeof window !== 'undefined' ? `${window.location.origin}/?invite=${room.code}` : ''
 	const studentRanks = Object.entries(
 		approved.reduce<Record<string, number>>((acc, t) => {
 			acc[t.suggestedBy] = (acc[t.suggestedBy] || 0) + t.votes
@@ -423,10 +636,34 @@ export default function Dashboard() {
 			return acc
 		}, {}),
 	).sort((a, b) => b[1] - a[1])
+	const navHref = (destination: DashboardView) => {
+		const params = new URLSearchParams({ view: destination })
+
+		if (room) params.set('classId', room.id)
+		if (selectedPlaylistId) params.set('playlistId', selectedPlaylistId)
+
+		return `/?${params.toString()}`
+	}
+	const navigate = (event: React.MouseEvent<HTMLAnchorElement>, destination: DashboardView) => {
+		if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+		event.preventDefault()
+		window.history.pushState(null, '', navHref(destination))
+		setView(destination)
+	}
 
 	return (
-		<div className="appShell">
+		<div className={`appShell${sidebarCollapsed ? ' sidebarCollapsed' : ''}`}>
 			<header className="globalHeader">
+				<button
+					className="sidebarToggle"
+					type="button"
+					onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+					aria-label={sidebarCollapsed ? 'Expandir menu de navegação' : 'Recolher menu de navegação'}
+					aria-expanded={!sidebarCollapsed}
+					title={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'}
+				>
+					{sidebarCollapsed ? <PanelLeftOpen size={21} /> : <PanelLeftClose size={21} />}
+				</button>
 				<div className="headerBrand">
 					<span className="headerBrandIcon">
 						<Music2 size={27} />
@@ -496,32 +733,65 @@ export default function Dashboard() {
 				</div>
 				<div className="sideLabel">NAVEGAÇÃO</div>
 				<nav>
-					<button className={view === 'playlist' ? 'active' : ''} onClick={() => setView('playlist')}>
-						<ListMusic size={19} /> Playlists
-					</button>
-					<button className={view === 'ranking' ? 'active' : ''} onClick={() => setView('ranking')}>
-						<ThumbsUp size={19} /> Ranking
-					</button>
-					<button className={view === 'profile' ? 'active' : ''} onClick={() => setView('profile')}>
-						<CircleUserRound size={19} /> Meu perfil
-					</button>
+					<a
+						className={view === 'playlist' ? 'active' : ''}
+						href={navHref('playlist')}
+						onClick={(event) => navigate(event, 'playlist')}
+						aria-label="Playlists"
+						title="Playlists"
+					>
+						<ListMusic size={19} /> <span>Playlists</span>
+					</a>
+					<a
+						className={view === 'ranking' ? 'active' : ''}
+						href={navHref('ranking')}
+						onClick={(event) => navigate(event, 'ranking')}
+						aria-label="Ranking"
+						title="Ranking"
+					>
+						<ThumbsUp size={19} /> <span>Ranking</span>
+					</a>
+					<a
+						className={view === 'profile' ? 'active' : ''}
+						href={navHref('profile')}
+						onClick={(event) => navigate(event, 'profile')}
+						aria-label="Meu perfil"
+						title="Meu perfil"
+					>
+						<CircleUserRound size={19} /> <span>Meu perfil</span>
+					</a>
 					{canManage && (
-						<button className={view === 'settings' ? 'active' : ''} onClick={() => setView('settings')}>
-							<Settings size={19} /> Configurações
-						</button>
+						<a
+							className={view === 'settings' ? 'active' : ''}
+							href={navHref('settings')}
+							onClick={(event) => navigate(event, 'settings')}
+							aria-label="Configurações"
+							title="Configurações"
+						>
+							<Settings size={19} /> <span>Configurações</span>
+						</a>
 					)}
 					{canCreateClass && (
-						<button
+						<a
 							className={view === 'createClass' ? 'active' : ''}
-							onClick={() => setView('createClass')}
+							href={navHref('createClass')}
+							onClick={(event) => navigate(event, 'createClass')}
+							aria-label="Nova turma"
+							title="Nova turma"
 						>
-							<Plus size={19} /> Nova turma
-						</button>
+							<Plus size={19} /> <span>Nova turma</span>
+						</a>
 					)}
 					{user.role === 'ADMIN' && (
-						<button className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}>
-							<ShieldCheck size={19} /> Administração
-						</button>
+						<a
+							className={view === 'admin' ? 'active' : ''}
+							href={navHref('admin')}
+							onClick={(event) => navigate(event, 'admin')}
+							aria-label="Administração"
+							title="Administração"
+						>
+							<ShieldCheck size={19} /> <span>Administração</span>
+						</a>
 					)}
 				</nav>
 				<div className="sidebarPromo">
@@ -626,18 +896,229 @@ export default function Dashboard() {
 						Salvando alterações...
 					</p>
 				)}
-				{error && (
-					<div className="alert error" role="alert">
-						{error}
-						<button onClick={() => setError('')}>×</button>
+				<FeedbackToast
+					error={error}
+					message={notice}
+					onCloseError={() => setError('')}
+					onCloseMessage={() => setNotice('')}
+				/>
+				<section
+					className={`listeningStage${view === 'playlist' && room ? '' : ' listeningStageHidden'}`}
+					aria-hidden={view !== 'playlist' || !room}
+					inert={view !== 'playlist' || !room}
+				>
+					<div className="listeningMain">
+						<div className="stageHeading">
+							<span className="eyebrow">♫ TOCANDO AGORA</span>
+							<span>
+								{selectedPlaylist?.name || 'Playlist da turma'} · {approved.length} músicas
+							</span>
+						</div>
+						<div className="stageMedia">
+							<div
+								className="vinylScene"
+								aria-label={current ? `Disco de ${current.title}` : 'Disco de vinil'}
+							>
+								<div className={`vinylDisc${playing ? ' spinning' : ''}`}>
+									<div className="vinylLabel">
+										{current?.suggestedAvatar ? (
+											<Image
+												src={current.suggestedAvatar}
+												alt={`Foto de ${current.suggestedBy}`}
+												width={130}
+												height={130}
+												unoptimized
+											/>
+										) : (
+											<span>
+												{current?.suggestedBy?.[0]?.toUpperCase() || <Music2 size={44} />}
+											</span>
+										)}
+									</div>
+								</div>
+							</div>
+							<div className="youtubeFrame stageVideo">
+								<div id="youtube-player" />
+							</div>
+						</div>
+						<div className="stageDetails">
+							{current ? (
+								<Cover track={current} />
+							) : (
+								<div className="cover">
+									<Music2 size={22} />
+								</div>
+							)}
+							<div className="stageTrackText">
+								<span className="eyebrow">{current ? 'MÚSICA ATUAL' : 'ESCOLHA UMA MÚSICA'}</span>
+								<h2>{current?.title || 'Sua trilha começa aqui'}</h2>
+								<p>{current?.artist || 'Selecione uma música da playlist para ouvir.'}</p>
+								{current && (
+									<small>
+										{' '}
+										Sugerida por <SuggesterAvatar track={current} /> {current.suggestedBy}
+									</small>
+								)}
+							</div>
+							{current && room && (
+								<div className="stageTrackActions">
+									<button
+										className={current.voted ? 'active' : ''}
+										type="button"
+										aria-label={current.voted ? 'Retirar curtida' : 'Curtir música'}
+										onClick={() =>
+											void action(
+												() =>
+													api(`/classes/${room.id}/vote`, {
+														method: 'POST',
+														body: JSON.stringify({ suggestionId: current.id }),
+													}),
+												'Voto atualizado.',
+											)
+										}
+									>
+										<ThumbsUp size={17} /> {current.votes}
+									</button>
+									<a
+										href={`https://www.youtube.com/watch?v=${current.youtubeVideoId}`}
+										target="_blank"
+										rel="noopener noreferrer"
+										aria-label="Abrir vídeo no YouTube"
+									>
+										<ExternalLink size={18} />
+									</a>
+								</div>
+							)}
+						</div>
+						<div className="stageTimeline">
+							<input
+								type="range"
+								min={0}
+								max={Math.max(duration, 1)}
+								value={Math.min(elapsed, Math.max(duration, 1))}
+								disabled={!ready || !current || duration <= 0}
+								aria-label="Posição da música"
+								onChange={(event) => {
+									const seconds = Number(event.target.value)
+
+									player.current?.seekTo?.(seconds, true)
+									setElapsed(seconds)
+								}}
+							/>
+							<div>
+								<span>{clockTime(elapsed)}</span>
+								<span>{clockTime(duration)}</span>
+							</div>
+						</div>
+						<div className="stageControls">
+							<button
+								type="button"
+								className={shuffleEnabled ? 'active' : ''}
+								onClick={toggleShuffle}
+								aria-label="Modo aleatório"
+								aria-pressed={shuffleEnabled}
+								title="Modo aleatório"
+							>
+								<Shuffle size={20} />
+							</button>
+							<button
+								type="button"
+								onClick={previous}
+								disabled={!ready || activeQueueIndex <= 0}
+								aria-label="Música anterior"
+								title="Música anterior"
+							>
+								<SkipBack size={21} />
+							</button>
+							<button
+								type="button"
+								className="stagePlay"
+								onClick={() => {
+									if (!ready || !current) return
+									if (playing) player.current?.pauseVideo?.()
+									else player.current?.playVideo?.()
+								}}
+								disabled={!ready || !current}
+								aria-label={playing ? 'Pausar' : 'Reproduzir'}
+								title={playing ? 'Pausar' : 'Reproduzir'}
+							>
+								{playing ? <Pause size={27} /> : <Play size={27} />}
+							</button>
+							<button
+								type="button"
+								onClick={() => next()}
+								disabled={!ready || !current}
+								aria-label="Próxima música"
+								title="Próxima música"
+							>
+								<SkipForward size={21} />
+							</button>
+							<button
+								type="button"
+								className={repeatMode !== 'off' ? 'active' : ''}
+								onClick={cycleRepeat}
+								aria-label={
+									repeatMode === 'off'
+										? 'Ativar repetição da fila'
+										: repeatMode === 'all'
+											? 'Repetir música atual'
+											: 'Desativar repetição'
+								}
+								aria-pressed={repeatMode !== 'off'}
+								title={
+									repeatMode === 'off'
+										? 'Repetição desligada'
+										: repeatMode === 'all'
+											? 'Repetir fila'
+											: 'Repetir música'
+								}
+							>
+								{repeatMode === 'one' ? <Repeat1 size={20} /> : <Repeat2 size={20} />}
+							</button>
+							<label className="stageVolume">
+								<Volume2 size={19} />
+								<input
+									type="range"
+									min={0}
+									max={100}
+									value={volume}
+									aria-label="Volume"
+									onChange={(event) => {
+										const nextVolume = Number(event.target.value)
+
+										setVolume(nextVolume)
+										player.current?.setVolume?.(nextVolume)
+									}}
+								/>
+							</label>
+						</div>
 					</div>
-				)}
-				{notice && (
-					<div className="alert success">
-						{notice}
-						<button onClick={() => setNotice('')}>×</button>
-					</div>
-				)}
+					<aside className="stageQueue" aria-label="Fila de reprodução">
+						<div className="stageHeading">
+							<span className="eyebrow">NA FILA</span>
+							<span>{visibleQueue.length} músicas</span>
+						</div>
+						{queuePreview.length ? (
+							queuePreview.map((track) => (
+								<button
+									type="button"
+									key={track.id}
+									className={`stageQueueTrack${track.id === current?.id ? ' active' : ''}`}
+									onClick={() => startTrack(track)}
+								>
+									<Cover track={track} />
+									<span>
+										<strong>{track.title}</strong>
+										<small>{track.artist}</small>
+										<small>por {track.suggestedBy}</small>
+									</span>
+								</button>
+							))
+						) : (
+							<p>Adicione músicas para montar a fila.</p>
+						)}
+					</aside>
+				</section>
 				{view === 'profile' ? (
 					<ProfilePanel user={user} onChanged={refresh} />
 				) : view === 'admin' && user.role === 'ADMIN' ? (
@@ -773,7 +1254,30 @@ export default function Dashboard() {
 						</div>
 						<div className="panel">
 							<h2>Convite</h2>
-							<p>Compartilhe este código com os alunos. A turma mantém a lista de vídeos no sistema.</p>
+							<p>
+								Compartilhe o link. Quem ainda não tem conta poderá se cadastrar antes de entrar na
+								turma.
+							</p>
+							<div className="inviteLink">
+								<a href={inviteUrl} target="_blank" rel="noopener noreferrer">
+									{inviteUrl}
+								</a>
+								<button
+									type="button"
+									className="secondary"
+									onClick={() =>
+										navigator.clipboard
+											.writeText(inviteUrl)
+											.then(() => setNotice('Link do convite copiado!'))
+											.catch(() =>
+												setError('Não foi possível copiar o link. Copie-o manualmente.'),
+											)
+									}
+								>
+									<Copy size={17} /> Copiar link
+								</button>
+							</div>
+							<p>Também é possível entrar com o código:</p>
 							<div className="invite">
 								<span>Código da turma</span>
 								<strong>{room.code}</strong>
@@ -1031,7 +1535,7 @@ export default function Dashboard() {
 											className="primary"
 											type="button"
 											disabled={!approved.length || !ready}
-											onClick={() => startTrack(approved[0])}
+											onClick={() => startTrack(sortedApproved[0])}
 										>
 											<Play size={16} /> Reproduzir tudo
 										</button>
@@ -1059,6 +1563,16 @@ export default function Dashboard() {
 										))}
 									</select>
 									<span>{approved.length} músicas aprovadas</span>
+								</label>
+								<label className="trackSort">
+									Ordem de reprodução
+									<select
+										value={sortMode}
+										onChange={(event) => setSortMode(event.target.value as 'original' | 'popular')}
+									>
+										<option value="original">Ordem de inclusão</option>
+										<option value="popular">Mais curtidas</option>
+									</select>
 								</label>
 								{filteredApproved.length ? (
 									filteredApproved.map((t, i) => (
@@ -1108,13 +1622,66 @@ export default function Dashboard() {
 											>
 												<ExternalLink size={17} />
 											</a>
+											{canManage && (
+												<>
+													<button
+														className="externalTrack"
+														type="button"
+														aria-label={`Editar ${t.title}`}
+														title="Editar música"
+														onClick={() => {
+															const title = prompt('Título da música', t.title)
+
+															if (title === null) return
+															const artist = prompt('Artista', t.artist)
+
+															if (artist === null) return
+															void action(
+																() =>
+																	api(`/classes/${room.id}/tracks`, {
+																		method: 'PATCH',
+																		body: JSON.stringify({
+																			suggestionId: t.id,
+																			title,
+																			artist,
+																		}),
+																	}),
+																'Música atualizada.',
+															)
+														}}
+													>
+														<Pencil size={17} />
+													</button>
+													<button
+														className="externalTrack removeTrack"
+														type="button"
+														aria-label={`Excluir ${t.title}`}
+														title="Excluir música"
+														onClick={() => {
+															if (confirm(`Excluir ${t.title} desta playlist?`))
+																void action(
+																	() =>
+																		api(`/classes/${room.id}/tracks`, {
+																			method: 'DELETE',
+																			body: JSON.stringify({
+																				suggestionId: t.id,
+																			}),
+																		}),
+																	'Música excluída.',
+																)
+														}}
+													>
+														<Trash2 size={17} />
+													</button>
+												</>
+											)}
 										</div>
 									))
 								) : (
 									<div className="emptyTracks">
 										{filter
 											? 'Nenhuma música corresponde à busca.'
-											: 'A playlist ainda está vazia. Adicione uma música abaixo.'}
+											: 'A playlist ainda está vazia. Adicione uma música acima.'}
 									</div>
 								)}
 							</section>
@@ -1176,21 +1743,31 @@ export default function Dashboard() {
 											>
 												Recusar
 											</button>
+											<button
+												className="externalTrack removeTrack"
+												type="button"
+												aria-label={`Excluir ${t.title}`}
+												title="Excluir música"
+												onClick={() => {
+													if (confirm(`Excluir ${t.title} desta playlist?`))
+														void action(
+															() =>
+																api(`/classes/${room.id}/tracks`, {
+																	method: 'DELETE',
+																	body: JSON.stringify({ suggestionId: t.id }),
+																}),
+															'Música excluída.',
+														)
+												}}
+											>
+												<Trash2 size={17} />
+											</button>
 										</div>
 									))}
 								</section>
 							)}
 						</div>
 						<aside className="rightRail">
-							<div className="nowCard">
-								<span className="eyebrow">PLAYER · YOUTUBE</span>
-								<div className="youtubeFrame">
-									<div id="youtube-player" />
-								</div>
-								<h2>{current?.title || 'Aguardando o primeiro play'}</h2>
-								<p>{current?.artist || 'Escolha uma música aprovada para ouvir.'}</p>
-								<small>Vídeo incorporado do YouTube</small>
-							</div>
 							<div className="sideCard topSongs">
 								<div className="sideCardTitle">
 									<h3>⭐ Mais votadas</h3>
@@ -1244,27 +1821,67 @@ export default function Dashboard() {
 					</div>
 				</div>
 				<div className="playerControls">
-					{view === 'playlist' ? (
-						<>
-							<button
-								onClick={() => {
-									if (!ready || !current) return
-									if (playing) player.current?.pauseVideo?.()
-									else player.current?.playVideo?.()
-								}}
-								title={playing ? 'Pausar' : 'Reproduzir'}
-								disabled={!ready || !current}
-							>
-								{playing ? <Pause size={21} /> : <Play size={21} />}
-							</button>
-							<button onClick={next} title="Próxima música" disabled={!ready || !current}>
-								<SkipForward size={20} />
-							</button>
-							<span>{ready ? 'Player pronto' : 'Carregando player'}</span>
-						</>
-					) : (
-						<span>Abra a playlist para ouvir</span>
-					)}
+					<>
+						<button
+							className={`footerMode${shuffleEnabled ? ' active' : ''}`}
+							onClick={toggleShuffle}
+							title="Modo aleatório"
+							aria-label="Modo aleatório"
+							aria-pressed={shuffleEnabled}
+						>
+							<Shuffle size={18} />
+						</button>
+						<button
+							onClick={previous}
+							title="Música anterior"
+							aria-label="Música anterior"
+							disabled={!ready || !current || activeQueueIndex <= 0}
+						>
+							<SkipBack size={20} />
+						</button>
+						<button
+							className="playPause"
+							onClick={() => {
+								if (!ready || !current) return
+								if (playing) player.current?.pauseVideo?.()
+								else player.current?.playVideo?.()
+							}}
+							title={playing ? 'Pausar' : 'Reproduzir'}
+							disabled={!ready || !current}
+						>
+							{playing ? <Pause size={21} /> : <Play size={21} />}
+						</button>
+						<button
+							onClick={() => next()}
+							title="Próxima música"
+							aria-label="Próxima música"
+							disabled={!ready || !current}
+						>
+							<SkipForward size={20} />
+						</button>
+						<button
+							className={`footerMode${repeatMode !== 'off' ? ' active' : ''}`}
+							onClick={cycleRepeat}
+							title={
+								repeatMode === 'off'
+									? 'Repetição desligada'
+									: repeatMode === 'all'
+										? 'Repetir fila'
+										: 'Repetir música'
+							}
+							aria-label={
+								repeatMode === 'off'
+									? 'Ativar repetição da fila'
+									: repeatMode === 'all'
+										? 'Repetir música atual'
+										: 'Desativar repetição'
+							}
+							aria-pressed={repeatMode !== 'off'}
+						>
+							{repeatMode === 'one' ? <Repeat1 size={18} /> : <Repeat2 size={18} />}
+						</button>
+						<span>{current ? 'Tocando agora' : ready ? 'Escolha uma música' : 'Carregando player'}</span>
+					</>
 				</div>
 				<span className="footerClass">{room?.name || 'Nenhuma turma selecionada'}</span>
 			</footer>
