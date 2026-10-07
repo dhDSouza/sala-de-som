@@ -2770,3 +2770,154 @@ body {
 		display: none;
 	}
 }
+
+/* Shared dark form controls, including native picker fallbacks. */
+select,
+input[type='file'] {
+	color-scheme: dark;
+	accent-color: #b58cff;
+}
+
+select:not([multiple]) {
+	appearance: none;
+	min-height: 42px;
+	padding: 8px 34px 8px 12px;
+	border: 1px solid #514367;
+	border-radius: 9px;
+	background-color: #141b28;
+	background-image:
+		linear-gradient(45deg, transparent 50%, #cdb7ff 50%), linear-gradient(135deg, #cdb7ff 50%, transparent 50%);
+	background-position:
+		calc(100% - 18px) center,
+		calc(100% - 13px) center;
+	background-size: 5px 5px;
+	background-repeat: no-repeat;
+	color: #f7f4ff;
+	cursor: pointer;
+}
+
+select:not([multiple]):hover {
+	border-color: #a78bfa;
+	background-color: #1e2636;
+}
+
+select:not([multiple]):focus-visible,
+input[type='file']:focus-visible {
+	outline: 2px solid #b58cff;
+	outline-offset: 2px;
+}
+
+select option {
+	background: #141b28;
+	color: #f7f4ff;
+}
+
+select option:checked,
+select option:hover {
+	background: #503680;
+	color: #fff;
+}
+
+.headerClassSelect option {
+	background: #141b28;
+	color: #f7f4ff;
+}
+
+.headerClassSelect option:checked,
+.headerClassSelect option:hover {
+	background: #503680;
+	color: #fff;
+}
+
+@supports (appearance: base-select) {
+	select:not([multiple]),
+	select:not([multiple])::picker(select) {
+		appearance: base-select;
+	}
+
+	select:not([multiple])::picker(select) {
+		max-height: min(320px, 50dvh);
+		padding: 6px;
+		overflow-y: auto;
+		border: 1px solid #765ca5;
+		border-radius: 10px;
+		background: #141b28;
+		box-shadow: 0 12px 32px #0009;
+	}
+
+	select:not([multiple])::picker-icon {
+		display: none;
+	}
+
+	select:not([multiple]) option {
+		padding: 10px 12px;
+		border-radius: 6px;
+	}
+
+	select:not([multiple]) option:hover,
+	select:not([multiple]) option:focus-visible,
+	select:not([multiple]) option:checked {
+		background: #503680;
+		color: #fff;
+	}
+}
+
+.headerClassSelect select:not([multiple]) {
+	min-height: 0;
+	padding-block: 0;
+	padding-left: 0;
+	border: 0;
+	background-color: transparent;
+}
+
+input[type='file'] {
+	min-height: 42px;
+	border: 1px solid #514367;
+	border-radius: 9px;
+	background: #141b28;
+	color: #c7bfd5;
+}
+
+input[type='file']::file-selector-button {
+	margin-right: 12px;
+	padding: 8px 12px;
+	border: 1px solid #765ca5;
+	border-radius: 7px;
+	background: #302842;
+	color: #f7f4ff;
+	cursor: pointer;
+}
+
+input[type='file']::file-selector-button:hover {
+	background: #503680;
+}
+
+.photoButton {
+	position: relative;
+	cursor: pointer;
+}
+
+.photoButton input[type='file'] {
+	display: block;
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	min-height: 0;
+	opacity: 0;
+	clip-path: inset(50%);
+}
+
+.photoButton:focus-within {
+	outline: 2px solid #b58cff;
+	outline-offset: 2px;
+}
+
+.selectedFileName {
+	min-width: 0;
+	max-width: 180px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: #c7bfd5;
+	font-size: 0.8rem;
+}

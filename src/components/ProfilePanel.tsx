@@ -18,6 +18,7 @@ export default function ProfilePanel({ user, onChanged }: { user: ProfileUser; o
 	const [message, setMessage] = useState('')
 	const [error, setError] = useState('')
 	const [busy, setBusy] = useState(false)
+	const [selectedFileName, setSelectedFileName] = useState('')
 	const photoInput = useRef<HTMLInputElement | null>(null)
 
 	useEffect(() => {
@@ -71,6 +72,8 @@ export default function ProfilePanel({ user, onChanged }: { user: ProfileUser; o
 
 						if (!response.ok) throw new Error(data.error || 'Não foi possível atualizar o perfil.')
 						setPreview(data.avatar)
+						setSelectedFileName('')
+						if (photoInput.current) photoInput.current.value = ''
 						setRemoveAvatar(false)
 						setMessage('Perfil atualizado.')
 						await onChanged()
@@ -102,17 +105,20 @@ export default function ProfilePanel({ user, onChanged }: { user: ProfileUser; o
 
 								if (file) {
 									setPreview(URL.createObjectURL(file))
+									setSelectedFileName(file.name)
 									setRemoveAvatar(false)
 								}
 							}}
 						/>
 					</label>
+					{selectedFileName && <span className="selectedFileName">{selectedFileName}</span>}
 					<button
 						className="secondary"
 						type="button"
 						onClick={() => {
 							if (photoInput.current) photoInput.current.value = ''
 							setPreview(null)
+							setSelectedFileName('')
 							setRemoveAvatar(true)
 						}}
 					>
