@@ -2921,3 +2921,13 @@ input[type='file']::file-selector-button:hover {
 	color: #c7bfd5;
 	font-size: 0.8rem;
 }
+
+.playerControls button:not(.playPause) {
+	background: transparent;
+	color: #bcb9ca;
+}
+
+.playerControls .playPause {
+	background: #b58cff;
+	color: #211732;
+}

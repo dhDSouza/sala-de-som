@@ -12,6 +12,7 @@ import {
 	Play,
 	Pause,
 	SkipForward,
+	SkipBack,
 	Disc3,
 	ShieldCheck,
 	Copy,
@@ -422,6 +423,12 @@ export default function Dashboard() {
 		}
 	}
 
+	function previous() {
+		const index = queue.current.findIndex((track) => track.id === currentRef.current?.id)
+
+		if (index > 0) startTrack(queue.current[index - 1])
+	}
+
 	useEffect(() => {
 		if (!playerVisible) return
 		let cancelled = false
@@ -471,6 +478,7 @@ export default function Dashboard() {
 	const approved = tracks.filter((t) => t.status === 'APPROVED'),
 		pending = tracks.filter((t) => t.status === 'PENDING')
 	const sortedApproved = sortMode === 'popular' ? [...approved].sort((a, b) => b.votes - a.votes) : approved
+	const currentQueueIndex = sortedApproved.findIndex((track) => track.id === current?.id)
 	const filteredApproved = sortedApproved.filter((track) =>
 		`${track.title} ${track.artist} ${track.suggestedBy}`
 			.toLocaleLowerCase('pt-BR')
@@ -1467,6 +1475,15 @@ export default function Dashboard() {
 					{view === 'playlist' ? (
 						<>
 							<button
+								onClick={previous}
+								title="Música anterior"
+								aria-label="Música anterior"
+								disabled={!ready || !current || currentQueueIndex <= 0}
+							>
+								<SkipBack size={20} />
+							</button>
+							<button
+								className="playPause"
 								onClick={() => {
 									if (!ready || !current) return
 									if (playing) player.current?.pauseVideo?.()
